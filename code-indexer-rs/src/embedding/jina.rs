@@ -37,8 +37,12 @@ struct JinaEmbedding {
 
 impl JinaProvider {
     pub fn new(config: &JinaGrepConfig) -> Self {
+        let client = Client::builder()
+            .timeout(std::time::Duration::from_secs(120))
+            .build()
+            .unwrap_or_default();
         Self {
-            client: Client::new(),
+            client,
             url: config.url.clone(),
             model: config.model.clone(),
             truncate_dim: config.truncate_dim.map(|d| d as usize),
