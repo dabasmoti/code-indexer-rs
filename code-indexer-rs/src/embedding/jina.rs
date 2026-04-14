@@ -38,7 +38,7 @@ struct JinaEmbedding {
 impl JinaProvider {
     pub fn new(config: &JinaGrepConfig) -> Self {
         let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(120))
+            .timeout(std::time::Duration::from_secs(300))
             .build()
             .unwrap_or_default();
         Self {
