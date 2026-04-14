@@ -264,6 +264,7 @@ async fn run_embed(db_dir: &std::path::Path, config: &Config) -> Result<()> {
     println!("Embedding: {} chunks to process", total_chunks);
     let mut total_embedded = 0usize;
 
+    let mut retries = 0u32;
     loop {
         let batch = store.get_chunks_without_embeddings(batch_size)?;
         if batch.is_empty() {
@@ -281,7 +282,21 @@ async fn run_embed(db_dir: &std::path::Path, config: &Config) -> Result<()> {
             })
             .collect();
 
-        let embeddings = provider.embed_batch(&texts).await?;
+        let embeddings = match provider.embed_batch(&texts).await {
+            Ok(e) => {
+                retries = 0;
+                e
+            }
+            Err(e) => {
+                retries += 1;
+                if retries > 3 {
+                    anyhow::bail!("embedding failed after 3 retries: {e}");
+                }
+                eprintln!("\n  batch failed (attempt {retries}/3): {e}, retrying in 5s...");
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                continue;
+            }
+        };
 
         store.conn.execute_batch("BEGIN")?;
         for ((chunk_id, _), embedding) in batch.iter().zip(embeddings.iter()) {
@@ -291,9 +306,7 @@ async fn run_embed(db_dir: &std::path::Path, config: &Config) -> Result<()> {
         store.conn.execute_batch("COMMIT")?;
 
         total_embedded += batch.len();
-        print!("\r  embedded {}/{} chunks...", total_embedded, total_chunks);
-        use std::io::Write;
-        std::io::stdout().flush().ok();
+        eprintln!("  embedded {}/{} chunks", total_embedded, total_chunks);
     }
 
     vector_index.save()?;
@@ -307,48 +320,64 @@ async fn run_embed(db_dir: &std::path::Path, config: &Config) -> Result<()> {
     Ok(())
 }
 
-/// Start jina-grep server if it's not already running. Returns true if we started it.
+/// Ensure jina-grep is running and the model is warm. Returns true if we started it.
 async fn maybe_start_jina(url: &str) -> bool {
-    // Check if already running
-    if jina_health_check(url).await {
-        return false;
-    }
+    let already_running = jina_health_check(url).await;
 
-    // Try to start it
-    let started = std::process::Command::new("jina-grep")
-        .args(["serve", "start"])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .is_ok();
+    if !already_running {
+        let started = std::process::Command::new("jina-grep")
+            .args(["serve", "start"])
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .is_ok();
 
-    if !started {
-        return false;
-    }
-
-    // Wait up to 15s for it to be ready
-    print!("Starting jina-grep...");
-    use std::io::Write;
-    std::io::stdout().flush().ok();
-
-    for _ in 0..15 {
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        if jina_health_check(url).await {
-            println!(" ready");
-            return true;
+        if !started {
+            return false;
         }
-        print!(".");
-        std::io::stdout().flush().ok();
+
+        eprint!("Starting jina-grep...");
+        for _ in 0..30 {
+            tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            if jina_health_check(url).await {
+                break;
+            }
+            eprint!(".");
+        }
     }
 
-    println!(" timed out");
+    eprint!(" warming up model...");
+    if jina_warmup(url).await {
+        eprintln!(" ready");
+        return !already_running;
+    }
+
+    eprintln!(" warmup failed");
     false
 }
 
 async fn jina_health_check(url: &str) -> bool {
     reqwest::Client::new()
         .get(format!("{}/health", url))
-        .timeout(std::time::Duration::from_secs(1))
+        .timeout(std::time::Duration::from_secs(2))
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}
+
+/// Sends a single-item embedding request to verify the model is loaded and serving.
+async fn jina_warmup(url: &str) -> bool {
+    let body = serde_json::json!({
+        "model": "jina-code-embeddings-0.5b",
+        "input": ["warmup"],
+        "task": "code2code",
+        "truncate_dim": 256
+    });
+    reqwest::Client::new()
+        .post(format!("{}/v1/embeddings", url))
+        .json(&body)
+        .timeout(std::time::Duration::from_secs(60))
         .send()
         .await
         .map(|r| r.status().is_success())
