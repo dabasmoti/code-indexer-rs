@@ -1,0 +1,61 @@
+[package]
+name = "code-indexer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# MCP server
+rmcp = { version = "1.4", features = ["server", "transport-io", "transport-streamable-http-server"] }
+
+# Storage
+rusqlite = { version = "0.31", features = ["bundled"] }
+usearch = "2"
+
+# Tree-sitter
+tree-sitter = "0.24"
+tree-sitter-rust = "0.24"
+tree-sitter-typescript = "0.23"
+tree-sitter-python = "0.25"
+tree-sitter-go = "0.25"
+tree-sitter-java = "0.23"
+tree-sitter-c = "0.24"
+tree-sitter-cpp = "0.23"
+tree-sitter-ruby = "0.23"
+tree-sitter-swift = "0.7"
+
+# Embedding providers
+reqwest = { version = "0.12", features = ["json"] }
+
+# Async
+tokio = { version = "1", features = ["full"] }
+
+# Git
+git2 = "0.19"
+
+# File watching
+notify = "6"
+notify-debouncer-mini = "0.4"
+
+# Config
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+toml = "0.8"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Async trait (object-safe async traits)
+async-trait = "0.1"
+
+# Utilities
+sha2 = "0.10"
+hex = "0.4"
+walkdir = "2"
