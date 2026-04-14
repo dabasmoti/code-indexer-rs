@@ -2,7 +2,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use rmcp::{handler::server::wrapper::Parameters, schemars, tool, tool_router};
+use rmcp::{handler::server::wrapper::Parameters, schemars, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tokio::sync::Mutex;
@@ -22,43 +22,43 @@ use crate::storage::vector::VectorIndex;
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct FindSymbolParams {
-    /// The search query string
+    /// Symbol name or partial name to search for (e.g. "create_user", "AuthService", "handle_")
     pub query: String,
-    /// Optional symbol kind filter (function, struct, class, etc.)
+    /// Filter by symbol kind: "function", "method", "struct", "class", "interface", "trait", "enum", "type_alias", "constant", "module"
     pub kind: Option<String>,
-    /// Optional language filter (rust, python, go, etc.)
+    /// Filter by language: "rust", "typescript", "python", "go", "java", "c", "cpp", "ruby", "swift"
     pub language: Option<String>,
-    /// Optional filter: only return symbols whose file path contains this substring
+    /// Filter by file path substring (e.g. "routers/" or "auth")
     pub file_path_contains: Option<String>,
-    /// Maximum number of results to return
+    /// Maximum results to return (default: 20)
     pub limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct SearchCodeParams {
-    /// The search query string
+    /// Natural language query describing what you're looking for (e.g. "how are JWT tokens validated", "database connection pooling", "error handling in API routes"). Can also be a keyword or code snippet.
     pub query: String,
-    /// Optional language filter
+    /// Filter by language: "rust", "typescript", "python", "go", "java", "c", "cpp", "ruby", "swift"
     pub language: Option<String>,
-    /// Optional filter: only return results whose file path contains this substring
+    /// Filter by file path substring (e.g. "backend/app" or "tests/")
     pub file_path_contains: Option<String>,
-    /// Maximum number of results to return
+    /// Maximum results to return (default: 20)
     pub limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct QueryDepsParams {
-    /// Optional file path to query dependencies for
+    /// File path relative to the repository root (e.g. "src/main.rs", "backend/app/deps.py")
     pub file: Option<String>,
-    /// Direction: "outgoing", "incoming", or "both" (default)
+    /// "outgoing" = what this file imports, "incoming" = what imports this file, "both" = both directions (default: "both")
     pub direction: Option<String>,
-    /// Maximum number of results per direction
+    /// Maximum results per direction (default: 50)
     pub limit: Option<usize>,
 }
 
 #[derive(Debug, Deserialize, JsonSchema)]
 pub struct ReindexParams {
-    /// When true, perform a full re-index regardless of what changed
+    /// Pass true to force a full re-index (clears existing data). Default false = incremental, only re-indexes changed files.
     pub full: Option<bool>,
 }
 
@@ -106,11 +106,11 @@ impl CodeIndexerServer {
 // Tool implementations via rmcp macros
 // ---------------------------------------------------------------------------
 
-#[tool_router(server_handler)]
+#[tool_router]
 impl CodeIndexerServer {
     /// Search for symbols (functions, structs, classes, etc.) by name using BM25 full-text search.
     #[tool(
-        description = "Search for symbols by name using BM25 full-text search. Returns functions, structs, classes, and other code symbols."
+        description = "Find code symbols (functions, classes, structs, methods, traits, enums) by name. Use this when you know the symbol name or part of it. Best for: locating definitions, finding all functions matching a pattern, discovering API surface area. Returns symbol metadata including signature, doc comments, visibility, and file location."
     )]
     pub async fn find_symbol(&self, Parameters(params): Parameters<FindSymbolParams>) -> String {
         let limit = params.limit.unwrap_or(self.config.search.default_limit);
@@ -149,7 +149,7 @@ impl CodeIndexerServer {
 
     /// Perform a hybrid semantic + keyword search over indexed code chunks.
     #[tool(
-        description = "Search code using hybrid semantic + keyword search. Returns matching code snippets with file locations and relevance scores."
+        description = "Search code using natural language or keywords with hybrid semantic + keyword matching. Use this when you want to understand how something works, find implementations of a concept, or locate code by describing its behavior. Best for: 'how does X work', 'where is Y handled', conceptual searches. Returns ranked code snippets with file paths and line numbers."
     )]
     pub async fn search_code(&self, Parameters(params): Parameters<SearchCodeParams>) -> String {
         use crate::search::bm25;
@@ -244,7 +244,7 @@ impl CodeIndexerServer {
 
     /// Query the dependency graph for a file or the entire repository.
     #[tool(
-        description = "Query file dependency graph. Returns outgoing imports and incoming dependents for the specified file."
+        description = "Explore file dependencies and import relationships. Use this to understand how files are connected: what a file imports (outgoing) and what other files depend on it (incoming). Best for: impact analysis before refactoring, understanding module boundaries, tracing data flow between files."
     )]
     pub async fn query_deps(&self, Parameters(params): Parameters<QueryDepsParams>) -> String {
         let limit = params.limit.unwrap_or(50);
@@ -303,7 +303,7 @@ impl CodeIndexerServer {
 
     /// Return current index health and statistics.
     #[tool(
-        description = "Return index health: total symbols, files indexed, per-language breakdown, embedding progress, active provider, and last indexed commit."
+        description = "Check the index status: total files, symbols, languages detected, embedding coverage percentage, and active embedding provider. Use this to verify the index is healthy before searching, or to understand the scope of the indexed codebase."
     )]
     pub async fn index_status(&self) -> String {
         let store = self.store.lock().await;
@@ -337,7 +337,7 @@ impl CodeIndexerServer {
 
     /// Trigger a re-index of the repository.
     #[tool(
-        description = "Trigger a re-index of the repository. Pass full=true to force complete re-index, otherwise performs incremental."
+        description = "Re-index the repository to pick up new or changed files. Use incremental (default) after small changes, or full=true after major refactors, branch switches, or when search results seem stale."
     )]
     pub async fn reindex(&self, Parameters(params): Parameters<ReindexParams>) -> String {
         let full = params.full.unwrap_or(false);
@@ -403,3 +403,28 @@ impl CodeIndexerServer {
         }
     }
 }
+
+// ---------------------------------------------------------------------------
+// ServerHandler with MCP instructions for the AI model
+// ---------------------------------------------------------------------------
+
+#[tool_handler(
+    router = Self::tool_router(),
+    name = "code-indexer",
+    version = "0.1.0",
+    instructions = "code-indexer provides semantic and keyword code search over an indexed repository. Use it to understand codebases, find implementations, and trace dependencies.
+
+Workflow:
+1. Call `index_status` first to verify the index is healthy and see what's indexed.
+2. Use `search_code` for natural language questions about the codebase (\"how does auth work\", \"where are API routes defined\").
+3. Use `find_symbol` when you know a specific function/class/type name or want to browse the API surface.
+4. Use `query_deps` to understand file relationships before refactoring or to trace data flow.
+5. Call `reindex` after making changes if search results seem stale.
+
+Tips:
+- `search_code` uses hybrid semantic + keyword matching — describe what you're looking for in plain English for best results.
+- `find_symbol` is exact name search — use partial names or prefixes to discover related symbols.
+- Combine `file_path_contains` filter with queries to scope results to specific modules or directories.
+- Check `index_status` embedding_progress_percent — 100% means semantic search is fully available."
+)]
+impl rmcp::ServerHandler for CodeIndexerServer {}
