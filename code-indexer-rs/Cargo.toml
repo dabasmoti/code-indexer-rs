@@ -15,7 +15,7 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 usearch = "2"
 
 # Tree-sitter
-tree-sitter = "0.24"
+tree-sitter = "0.25"
 tree-sitter-rust = "0.24"
 tree-sitter-typescript = "0.23"
 tree-sitter-python = "0.25"
@@ -59,6 +59,7 @@ async-trait = "0.1"
 sha2 = "0.10"
 hex = "0.4"
 walkdir = "2"
+streaming-iterator = "0.1"
 
 # Config paths
 dirs = "5"
