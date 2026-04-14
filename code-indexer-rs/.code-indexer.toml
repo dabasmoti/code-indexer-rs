@@ -1,0 +1,20 @@
+# code-indexer-rs: configured for jina-code-embeddings-0.5b on Apple Silicon (MLX)
+# Requires jina-grep running locally: https://github.com/jina-ai/jina-grep
+
+[embedding]
+provider = "jina"          # Skip auto-detection, use jina-grep directly
+enabled = true
+
+[embedding.jina_grep]
+url = "http://localhost:8089"
+model = "jina-code-embeddings-0.5b"
+truncate_dim = 256         # Matryoshka: 64-896 supported; 256 balances quality vs storage
+batch_size = 256           # Apple Silicon MLX handles large batches well
+task = "code"              # Task hint for prompt_name selection (code indexing)
+
+[indexer]
+max_file_size = 1_048_576
+
+[search]
+default_limit = 20
+max_limit = 100

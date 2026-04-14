@@ -11,11 +11,7 @@ pub async fn vector_search(
     query: &str,
     limit: usize,
 ) -> Result<Vec<SearchResult>> {
-    let query_vectors = provider.embed_batch(&[query.to_string()]).await?;
-    let query_vec = match query_vectors.into_iter().next() {
-        Some(v) => v,
-        None => return Ok(vec![]),
-    };
+    let query_vec = provider.embed_query(query).await?;
 
     let results = vector_index.search(&query_vec, limit)?;
 

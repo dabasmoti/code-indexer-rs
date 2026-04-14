@@ -173,9 +173,9 @@ impl CodeIndexerServer {
             let prov_guard = self.provider.read().await;
             if let Some(provider) = prov_guard.as_ref() {
                 // Embed the query first (no store/index locks held).
-                let embedding = match provider.embed_batch(std::slice::from_ref(&query)).await {
-                    Ok(mut vecs) if !vecs.is_empty() => vecs.remove(0),
-                    _ => vec![],
+                let embedding = match provider.embed_query(&query).await {
+                    Ok(vec) => vec,
+                    Err(_) => vec![],
                 };
 
                 if embedding.is_empty() {
