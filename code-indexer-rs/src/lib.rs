@@ -4,5 +4,6 @@ pub mod embedding;
 pub mod indexer;
 pub mod parser;
 pub mod search;
+pub mod server;
 pub mod storage;
 pub mod types;

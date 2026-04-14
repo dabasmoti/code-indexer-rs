@@ -8,7 +8,8 @@ edition = "2021"
 clap = { version = "4", features = ["derive"] }
 
 # MCP server
-rmcp = { version = "1.4", features = ["server", "transport-io", "transport-streamable-http-server"] }
+rmcp = { version = "1.4", features = ["server", "macros", "schemars", "transport-io", "transport-streamable-http-server"] }
+schemars = "1.0"
 
 # Storage
 rusqlite = { version = "0.31", features = ["bundled"] }
