@@ -107,8 +107,7 @@ impl super::LanguageParser for TypeScriptParser {
             None => return vec![],
         };
 
-        let query_src =
-            "(import_statement source: (string (string_fragment) @path)) @imp";
+        let query_src = "(import_statement source: (string (string_fragment) @path)) @imp";
         let query = match Query::new(&self.language, query_src) {
             Ok(q) => q,
             Err(_) => return vec![],
@@ -151,12 +150,7 @@ impl super::LanguageParser for TypeScriptParser {
         let tree = match parser.parse(source, None) {
             Some(t) => t,
             None => {
-                return chunker::chunk_by_lines(
-                    source_str,
-                    file_path,
-                    Language::TypeScript,
-                    &[],
-                )
+                return chunker::chunk_by_lines(source_str, file_path, Language::TypeScript, &[])
             }
         };
         let mut boundaries = Vec::new();

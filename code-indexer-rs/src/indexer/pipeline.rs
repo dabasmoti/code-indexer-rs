@@ -50,15 +50,12 @@ impl IndexPipeline {
 
         if let Some(old_hash) = last_commit {
             if self.git.is_git_repo() {
-                match self.git.changed_files_since(&old_hash) {
-                    Ok(changed) => {
-                        let indexable: Vec<PathBuf> = changed
-                            .into_iter()
-                            .filter(|p| self.should_index(p))
-                            .collect();
-                        return self.index_files(indexable).await;
-                    }
-                    Err(_) => {}
+                if let Ok(changed) = self.git.changed_files_since(&old_hash) {
+                    let indexable: Vec<PathBuf> = changed
+                        .into_iter()
+                        .filter(|p| self.should_index(p))
+                        .collect();
+                    return self.index_files(indexable).await;
                 }
             }
         }
@@ -94,10 +91,7 @@ impl IndexPipeline {
             .into_iter()
             .filter_entry(|e| {
                 if e.file_type().is_dir() {
-                    let dir_name = e
-                        .file_name()
-                        .to_string_lossy()
-                        .to_string();
+                    let dir_name = e.file_name().to_string_lossy().to_string();
                     return !self.is_excluded_dir_name(&dir_name);
                 }
                 true
@@ -160,7 +154,10 @@ impl IndexPipeline {
         }
 
         // Reject files matching exclude patterns
-        let file_name = path.file_name().map(|n| n.to_string_lossy()).unwrap_or_default();
+        let file_name = path
+            .file_name()
+            .map(|n| n.to_string_lossy())
+            .unwrap_or_default();
         for pattern in &self.config.indexer.exclude_patterns {
             if simple_glob_match(pattern, &file_name) {
                 return false;
@@ -188,10 +185,7 @@ impl IndexPipeline {
                 }
             };
 
-            let ext = file_path
-                .extension()
-                .and_then(|e| e.to_str())
-                .unwrap_or("");
+            let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
 
             let language = match Language::from_extension(ext) {
                 Some(l) => l,
@@ -255,8 +249,8 @@ impl IndexPipeline {
 }
 
 fn content_hash(path: &Path) -> Result<String> {
-    let bytes = std::fs::read(path)
-        .with_context(|| format!("Failed to read file: {}", path.display()))?;
+    let bytes =
+        std::fs::read(path).with_context(|| format!("Failed to read file: {}", path.display()))?;
     Ok(compute_bytes_hash(&bytes))
 }
 
@@ -272,6 +266,6 @@ fn simple_glob_match(pattern: &str, name: &str) -> bool {
     } else if let Some(prefix) = pattern.strip_suffix('*') {
         name.starts_with(prefix)
     } else {
-        name.contains(pattern.as_ref() as &str)
+        name.contains(pattern)
     }
 }

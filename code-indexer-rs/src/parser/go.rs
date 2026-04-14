@@ -101,8 +101,7 @@ impl super::LanguageParser for GoParser {
             None => return vec![],
         };
 
-        let query_src =
-            r#"(import_spec path: (interpreted_string_literal) @path) @imp"#;
+        let query_src = r#"(import_spec path: (interpreted_string_literal) @path) @imp"#;
         let query = match Query::new(&self.language, query_src) {
             Ok(q) => q,
             Err(_) => return vec![],
@@ -117,11 +116,7 @@ impl super::LanguageParser for GoParser {
             for cap in m.captures {
                 let cap_name = capture_names[cap.index as usize];
                 if cap_name == "path" {
-                    path_text = cap
-                        .node
-                        .utf8_text(source)
-                        .unwrap_or("")
-                        .trim_matches('"');
+                    path_text = cap.node.utf8_text(source).unwrap_or("").trim_matches('"');
                 } else {
                     imp_node = Some(cap.node);
                 }

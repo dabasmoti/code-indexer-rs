@@ -10,7 +10,11 @@ use code_indexer::server::CodeIndexerServer;
 use code_indexer::storage::sqlite::SqliteStore;
 
 #[derive(Parser)]
-#[command(name = "code-indexer", version, about = "AI code indexer with hybrid search")]
+#[command(
+    name = "code-indexer",
+    version,
+    about = "AI code indexer with hybrid search"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -92,7 +96,7 @@ async fn main() -> Result<()> {
             let server = CodeIndexerServer::new(repo, config).await?;
 
             if transport == "stdio" {
-                use rmcp::{ServiceExt, transport::stdio};
+                use rmcp::{transport::stdio, ServiceExt};
                 let service = server.serve(stdio()).await?;
                 service.waiting().await?;
             } else {
@@ -100,13 +104,17 @@ async fn main() -> Result<()> {
                     transport = %transport,
                     "HTTP transport not yet implemented, falling back to stdio"
                 );
-                use rmcp::{ServiceExt, transport::stdio};
+                use rmcp::{transport::stdio, ServiceExt};
                 let service = server.serve(stdio()).await?;
                 service.waiting().await?;
             }
         }
 
-        Commands::Index { repo, full, embed: _ } => {
+        Commands::Index {
+            repo,
+            full,
+            embed: _,
+        } => {
             let mut config = Config::load(&repo)?;
             config.indexer.watch = false;
 

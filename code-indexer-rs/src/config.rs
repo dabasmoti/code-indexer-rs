@@ -254,24 +254,13 @@ impl Default for StorageConfig {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct Config {
     pub indexer: IndexerConfig,
     pub embedding: EmbeddingConfig,
     pub search: SearchConfig,
     pub storage: StorageConfig,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            indexer: IndexerConfig::default(),
-            embedding: EmbeddingConfig::default(),
-            search: SearchConfig::default(),
-            storage: StorageConfig::default(),
-        }
-    }
 }
 
 impl Config {

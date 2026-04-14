@@ -1,0 +1,4 @@
+/target
+.code-indexer/
+*.sqlite
+*.index

@@ -28,8 +28,9 @@ pub fn fuse_search_results(
     bm25_boost: f64,
     limit: usize,
 ) -> Vec<SearchResult> {
-    let make_id =
-        |r: &SearchResult| -> String { format!("{}:{}:{}", r.file_path.display(), r.line_start, r.line_end) };
+    let make_id = |r: &SearchResult| -> String {
+        format!("{}:{}:{}", r.file_path.display(), r.line_start, r.line_end)
+    };
 
     let bm25_ranked: Vec<(String, usize)> = bm25_results
         .iter()

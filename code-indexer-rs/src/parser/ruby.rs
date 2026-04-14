@@ -116,7 +116,7 @@ impl super::LanguageParser for RubyParser {
             let mut req_node = None;
             for cap in m.captures {
                 let cap_name = capture_names[cap.index as usize];
-                match cap_name.as_ref() {
+                match cap_name {
                     "method" => method_name = cap.node.utf8_text(source).unwrap_or(""),
                     "path" => path_text = cap.node.utf8_text(source).unwrap_or(""),
                     _ => req_node = Some(cap.node),

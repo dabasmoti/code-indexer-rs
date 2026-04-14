@@ -44,7 +44,8 @@ impl super::EmbeddingProvider for OllamaProvider {
             input: texts.to_vec(),
         };
 
-        let response = self.client
+        let response = self
+            .client
             .post(format!("{}/api/embed", self.url))
             .json(&request)
             .send()

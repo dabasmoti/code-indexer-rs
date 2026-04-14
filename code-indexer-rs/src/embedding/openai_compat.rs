@@ -31,11 +31,13 @@ struct OpenAiEmbedding {
 
 impl OpenAiCompatProvider {
     pub fn new(config: &OpenAiCompatConfig) -> Self {
-        let api_key = config.api_key_env
+        let api_key = config
+            .api_key_env
             .as_deref()
             .and_then(|env_var| std::env::var(env_var).ok());
 
-        let url = config.url
+        let url = config
+            .url
             .clone()
             .unwrap_or_else(|| "https://api.openai.com/v1/embeddings".to_string());
 
@@ -62,11 +64,7 @@ impl super::EmbeddingProvider for OpenAiCompatProvider {
             req = req.bearer_auth(key);
         }
 
-        let response = req
-            .send()
-            .await?
-            .json::<OpenAiEmbedResponse>()
-            .await?;
+        let response = req.send().await?.json::<OpenAiEmbedResponse>().await?;
 
         Ok(response.data.into_iter().map(|e| e.embedding).collect())
     }

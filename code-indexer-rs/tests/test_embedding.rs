@@ -1,5 +1,5 @@
-use code_indexer::embedding::{EmbeddingProvider, detect_provider};
 use code_indexer::config::Config;
+use code_indexer::embedding::{detect_provider, EmbeddingProvider};
 
 #[tokio::test]
 async fn test_provider_detection_graceful_fallback() {
@@ -15,8 +15,8 @@ async fn test_provider_detection_graceful_fallback() {
 
 #[tokio::test]
 async fn test_jina_provider_health_check_offline() {
-    use code_indexer::embedding::jina::JinaProvider;
     use code_indexer::config::JinaGrepConfig;
+    use code_indexer::embedding::jina::JinaProvider;
 
     let config = JinaGrepConfig {
         url: "http://localhost:19999".to_string(), // unlikely to be running
@@ -28,8 +28,8 @@ async fn test_jina_provider_health_check_offline() {
 
 #[tokio::test]
 async fn test_ollama_provider_health_check_offline() {
-    use code_indexer::embedding::ollama::OllamaProvider;
     use code_indexer::config::OllamaConfig;
+    use code_indexer::embedding::ollama::OllamaProvider;
 
     let config = OllamaConfig {
         url: "http://localhost:19998".to_string(),

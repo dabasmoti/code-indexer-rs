@@ -1,14 +1,14 @@
 use crate::types::*;
 use std::path::Path;
 
-mod rust;
-mod typescript;
-mod python;
+mod c_cpp;
 mod go;
 mod java;
-mod c_cpp;
+mod python;
 mod ruby;
+mod rust;
 mod swift;
+mod typescript;
 
 pub trait LanguageParser: Send + Sync {
     fn language(&self) -> Language;

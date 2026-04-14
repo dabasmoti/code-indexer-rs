@@ -53,7 +53,8 @@ impl super::EmbeddingProvider for JinaProvider {
             truncate_dim: self.truncate_dim,
         };
 
-        let response = self.client
+        let response = self
+            .client
             .post(format!("{}/v1/embeddings", self.url))
             .json(&request)
             .send()

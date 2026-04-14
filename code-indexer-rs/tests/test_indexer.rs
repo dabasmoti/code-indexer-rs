@@ -67,7 +67,9 @@ async fn test_full_pipeline_index_then_search() {
     fs::create_dir(&repo_dir).unwrap();
 
     // Create a mini codebase
-    fs::write(repo_dir.join("lib.rs"), r#"
+    fs::write(
+        repo_dir.join("lib.rs"),
+        r#"
 use std::collections::HashMap;
 
 /// A cache for storing key-value pairs.
@@ -93,7 +95,9 @@ impl Cache {
 pub fn create_cache() -> Cache {
     Cache::new()
 }
-    "#).unwrap();
+    "#,
+    )
+    .unwrap();
 
     let config = Config::default();
     let db_dir = dir.path().join(".code-indexer");

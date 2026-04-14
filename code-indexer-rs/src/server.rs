@@ -2,19 +2,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
-use rmcp::{
-    handler::server::wrapper::Parameters,
-    schemars,
-    tool, tool_router,
-};
+use rmcp::{handler::server::wrapper::Parameters, schemars, tool, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tokio::sync::Mutex;
 use tokio::sync::RwLock;
 
 use crate::config::Config;
-use crate::embedding::EmbeddingProvider;
 use crate::embedding::detection::detect_provider;
+use crate::embedding::EmbeddingProvider;
 use crate::indexer::pipeline::IndexPipeline;
 use crate::search::SearchCoordinator;
 use crate::storage::sqlite::SqliteStore;
@@ -90,10 +86,7 @@ impl CodeIndexerServer {
 
         let vector_index = if let Some(ref p) = provider {
             let dims = p.dimensions();
-            match VectorIndex::open(&db_dir, dims) {
-                Ok(vi) => Some(vi),
-                Err(_) => None,
-            }
+            VectorIndex::open(&db_dir, dims).ok()
         } else {
             None
         };
@@ -116,11 +109,10 @@ impl CodeIndexerServer {
 #[tool_router(server_handler)]
 impl CodeIndexerServer {
     /// Search for symbols (functions, structs, classes, etc.) by name using BM25 full-text search.
-    #[tool(description = "Search for symbols by name using BM25 full-text search. Returns functions, structs, classes, and other code symbols.")]
-    pub async fn find_symbol(
-        &self,
-        Parameters(params): Parameters<FindSymbolParams>,
-    ) -> String {
+    #[tool(
+        description = "Search for symbols by name using BM25 full-text search. Returns functions, structs, classes, and other code symbols."
+    )]
+    pub async fn find_symbol(&self, Parameters(params): Parameters<FindSymbolParams>) -> String {
         let limit = params.limit.unwrap_or(self.config.search.default_limit);
 
         let store = self.store.lock().await;
@@ -156,11 +148,10 @@ impl CodeIndexerServer {
     }
 
     /// Perform a hybrid semantic + keyword search over indexed code chunks.
-    #[tool(description = "Search code using hybrid semantic + keyword search. Returns matching code snippets with file locations and relevance scores.")]
-    pub async fn search_code(
-        &self,
-        Parameters(params): Parameters<SearchCodeParams>,
-    ) -> String {
+    #[tool(
+        description = "Search code using hybrid semantic + keyword search. Returns matching code snippets with file locations and relevance scores."
+    )]
+    pub async fn search_code(&self, Parameters(params): Parameters<SearchCodeParams>) -> String {
         use crate::search::bm25;
         use crate::search::hybrid;
 
@@ -182,7 +173,7 @@ impl CodeIndexerServer {
             let prov_guard = self.provider.read().await;
             if let Some(provider) = prov_guard.as_ref() {
                 // Embed the query first (no store/index locks held).
-                let embedding = match provider.embed_batch(&[query.clone()]).await {
+                let embedding = match provider.embed_batch(std::slice::from_ref(&query)).await {
                     Ok(mut vecs) if !vecs.is_empty() => vecs.remove(0),
                     _ => vec![],
                 };
@@ -195,23 +186,22 @@ impl CodeIndexerServer {
                     if let Some(vi) = vi_guard.as_ref() {
                         let store = self.store.lock().await;
                         match vi.search(&embedding, limit * 2) {
-                            Ok(hits) => {
-                                hits.into_iter()
-                                    .filter_map(|(chunk_id, dist)| {
-                                        let chunk = store.get_chunk_by_id(chunk_id as i64).ok()??;
-                                        Some(crate::types::SearchResult {
-                                            file_path: chunk.file_path,
-                                            line_start: chunk.line_start,
-                                            line_end: chunk.line_end,
-                                            snippet: chunk.content,
-                                            symbol_name: None,
-                                            symbol_kind: None,
-                                            score: 1.0 - dist as f64,
-                                            language: chunk.language,
-                                        })
+                            Ok(hits) => hits
+                                .into_iter()
+                                .filter_map(|(chunk_id, dist)| {
+                                    let chunk = store.get_chunk_by_id(chunk_id as i64).ok()??;
+                                    Some(crate::types::SearchResult {
+                                        file_path: chunk.file_path,
+                                        line_start: chunk.line_start,
+                                        line_end: chunk.line_end,
+                                        snippet: chunk.content,
+                                        symbol_name: None,
+                                        symbol_kind: None,
+                                        score: 1.0 - dist as f64,
+                                        language: chunk.language,
                                     })
-                                    .collect::<Vec<_>>()
-                            }
+                                })
+                                .collect::<Vec<_>>(),
                             Err(_) => vec![],
                         }
                     } else {
@@ -253,11 +243,10 @@ impl CodeIndexerServer {
     }
 
     /// Query the dependency graph for a file or the entire repository.
-    #[tool(description = "Query file dependency graph. Returns outgoing imports and incoming dependents for the specified file.")]
-    pub async fn query_deps(
-        &self,
-        Parameters(params): Parameters<QueryDepsParams>,
-    ) -> String {
+    #[tool(
+        description = "Query file dependency graph. Returns outgoing imports and incoming dependents for the specified file."
+    )]
+    pub async fn query_deps(&self, Parameters(params): Parameters<QueryDepsParams>) -> String {
         let limit = params.limit.unwrap_or(50);
         let direction = params.direction.as_deref().unwrap_or("both");
 
@@ -313,7 +302,9 @@ impl CodeIndexerServer {
     }
 
     /// Return current index health and statistics.
-    #[tool(description = "Return index health: total symbols, files indexed, per-language breakdown, embedding progress, active provider, and last indexed commit.")]
+    #[tool(
+        description = "Return index health: total symbols, files indexed, per-language breakdown, embedding progress, active provider, and last indexed commit."
+    )]
     pub async fn index_status(&self) -> String {
         let store = self.store.lock().await;
         let prov_guard = self.provider.read().await;
@@ -345,11 +336,10 @@ impl CodeIndexerServer {
     }
 
     /// Trigger a re-index of the repository.
-    #[tool(description = "Trigger a re-index of the repository. Pass full=true to force complete re-index, otherwise performs incremental.")]
-    pub async fn reindex(
-        &self,
-        Parameters(params): Parameters<ReindexParams>,
-    ) -> String {
+    #[tool(
+        description = "Trigger a re-index of the repository. Pass full=true to force complete re-index, otherwise performs incremental."
+    )]
+    pub async fn reindex(&self, Parameters(params): Parameters<ReindexParams>) -> String {
         let full = params.full.unwrap_or(false);
 
         // IndexPipeline is !Sync because SqliteStore wraps Connection (which uses RefCell).

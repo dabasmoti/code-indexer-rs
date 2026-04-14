@@ -1,4 +1,4 @@
-use code_indexer::parser::{create_parser, LanguageParser};
+use code_indexer::parser::create_parser;
 use code_indexer::types::*;
 use std::path::Path;
 
@@ -11,8 +11,14 @@ fn test_rust_parser_symbols() {
     let names: Vec<&str> = symbols.iter().map(|s| s.name.as_str()).collect();
     assert!(names.contains(&"Config"), "should find struct Config");
     assert!(names.contains(&"Status"), "should find enum Status");
-    assert!(names.contains(&"process_data"), "should find fn process_data");
-    assert!(names.contains(&"MAX_RETRIES"), "should find const MAX_RETRIES");
+    assert!(
+        names.contains(&"process_data"),
+        "should find fn process_data"
+    );
+    assert!(
+        names.contains(&"MAX_RETRIES"),
+        "should find const MAX_RETRIES"
+    );
     assert!(names.contains(&"new"), "should find method new");
     assert!(names.contains(&"Processor"), "should find trait Processor");
 

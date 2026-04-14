@@ -1,7 +1,7 @@
+pub mod detection;
 pub mod jina;
 pub mod ollama;
 pub mod openai_compat;
-pub mod detection;
 
 use anyhow::Result;
 

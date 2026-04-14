@@ -21,7 +21,8 @@ fn test_insert_and_search_symbols() {
         kind: SymbolKind::Function,
         language: Language::Rust,
         file_path: PathBuf::from("src/main.rs"),
-        line_start: 10, line_end: 25,
+        line_start: 10,
+        line_end: 25,
         signature: Some("fn process_data(input: &str) -> Result<Output>".to_string()),
         doc_comment: Some("Processes raw input data".to_string()),
         visibility: Some("pub".to_string()),
@@ -42,7 +43,8 @@ fn test_insert_and_retrieve_chunks() {
         content: "fn hello() { println!(\"hello\"); }".to_string(),
         preamble: "mod main".to_string(),
         content_hash: "abc123".to_string(),
-        line_start: 1, line_end: 3,
+        line_start: 1,
+        line_end: 3,
         language: Language::Rust,
     };
     let ids = store.insert_chunks(&[chunk]).unwrap();
@@ -55,10 +57,14 @@ fn test_insert_and_retrieve_chunks() {
 fn test_file_tracking() {
     let dir = TempDir::new().unwrap();
     let store = SqliteStore::open(dir.path()).unwrap();
-    store.upsert_indexed_file("src/main.rs", "hash123", Language::Rust, 5).unwrap();
+    store
+        .upsert_indexed_file("src/main.rs", "hash123", Language::Rust, 5)
+        .unwrap();
     let hash = store.get_file_content_hash("src/main.rs").unwrap();
     assert_eq!(hash, Some("hash123".to_string()));
-    store.upsert_indexed_file("src/main.rs", "hash456", Language::Rust, 3).unwrap();
+    store
+        .upsert_indexed_file("src/main.rs", "hash456", Language::Rust, 3)
+        .unwrap();
     let hash = store.get_file_content_hash("src/main.rs").unwrap();
     assert_eq!(hash, Some("hash456".to_string()));
 }
@@ -68,12 +74,21 @@ fn test_delete_file_data() {
     let dir = TempDir::new().unwrap();
     let store = SqliteStore::open(dir.path()).unwrap();
     let symbol = Symbol {
-        name: "foo".to_string(), kind: SymbolKind::Function, language: Language::Rust,
-        file_path: PathBuf::from("src/old.rs"), line_start: 1, line_end: 5,
-        signature: None, doc_comment: None, visibility: None, parent: None,
+        name: "foo".to_string(),
+        kind: SymbolKind::Function,
+        language: Language::Rust,
+        file_path: PathBuf::from("src/old.rs"),
+        line_start: 1,
+        line_end: 5,
+        signature: None,
+        doc_comment: None,
+        visibility: None,
+        parent: None,
     };
     store.insert_symbols(&[symbol]).unwrap();
-    store.upsert_indexed_file("src/old.rs", "hash", Language::Rust, 1).unwrap();
+    store
+        .upsert_indexed_file("src/old.rs", "hash", Language::Rust, 1)
+        .unwrap();
     store.delete_file_data("src/old.rs").unwrap();
     let results = store.search_symbols("foo", 10).unwrap();
     assert!(results.is_empty());

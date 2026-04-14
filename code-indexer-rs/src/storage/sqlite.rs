@@ -28,8 +28,9 @@ impl SqliteStore {
     }
 
     fn create_tables(&self) -> Result<()> {
-        self.conn.execute_batch(
-            r#"
+        self.conn
+            .execute_batch(
+                r#"
             CREATE TABLE IF NOT EXISTS symbols (
                 id          INTEGER PRIMARY KEY AUTOINCREMENT,
                 name        TEXT NOT NULL,
@@ -126,8 +127,8 @@ impl SqliteStore {
                 value TEXT NOT NULL
             );
             "#,
-        )
-        .context("Failed to create tables")
+            )
+            .context("Failed to create tables")
     }
 
     pub fn insert_symbols(&self, symbols: &[Symbol]) -> Result<()> {
@@ -316,7 +317,12 @@ impl SqliteStore {
         Ok(results)
     }
 
-    pub fn get_cached_embedding(&self, content_hash: &str, provider: &str, dimensions: usize) -> Result<Option<Vec<f32>>> {
+    pub fn get_cached_embedding(
+        &self,
+        content_hash: &str,
+        provider: &str,
+        dimensions: usize,
+    ) -> Result<Option<Vec<f32>>> {
         let mut stmt = self.conn.prepare(
             "SELECT vector FROM embedding_cache WHERE content_hash = ?1 AND provider = ?2 AND dimensions = ?3"
         )?;
@@ -331,7 +337,13 @@ impl SqliteStore {
         }
     }
 
-    pub fn store_cached_embedding(&self, content_hash: &str, provider: &str, dimensions: usize, vector: &[f32]) -> Result<()> {
+    pub fn store_cached_embedding(
+        &self,
+        content_hash: &str,
+        provider: &str,
+        dimensions: usize,
+        vector: &[f32],
+    ) -> Result<()> {
         let blob = vec_to_bytes(vector);
         self.conn.execute(
             "INSERT OR REPLACE INTO embedding_cache (content_hash, provider, dimensions, vector) VALUES (?1, ?2, ?3, ?4)",
@@ -379,14 +391,18 @@ impl SqliteStore {
     }
 
     pub fn delete_file_data(&self, file_path: &str) -> Result<()> {
-        self.conn
-            .execute("DELETE FROM symbols WHERE file_path = ?1", params![file_path])?;
+        self.conn.execute(
+            "DELETE FROM symbols WHERE file_path = ?1",
+            params![file_path],
+        )?;
         self.conn.execute(
             "DELETE FROM chunk_vectors WHERE chunk_id IN (SELECT id FROM chunks WHERE file_path = ?1)",
             params![file_path],
         )?;
-        self.conn
-            .execute("DELETE FROM chunks WHERE file_path = ?1", params![file_path])?;
+        self.conn.execute(
+            "DELETE FROM chunks WHERE file_path = ?1",
+            params![file_path],
+        )?;
         self.conn.execute(
             "DELETE FROM indexed_files WHERE file_path = ?1",
             params![file_path],
@@ -481,17 +497,17 @@ impl SqliteStore {
     }
 
     pub fn get_status(&self) -> Result<IndexStatus> {
-        let total_symbols: usize = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM symbols", [], |row| {
-                row.get::<_, i64>(0)
-            })? as usize;
+        let total_symbols: usize =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM symbols", [], |row| {
+                    row.get::<_, i64>(0)
+                })? as usize;
 
-        let total_files: usize = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM indexed_files", [], |row| {
-                row.get::<_, i64>(0)
-            })? as usize;
+        let total_files: usize =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM indexed_files", [], |row| {
+                    row.get::<_, i64>(0)
+                })? as usize;
 
         let total_chunks: usize = self
             .conn
@@ -499,11 +515,11 @@ impl SqliteStore {
                 row.get::<_, i64>(0)
             })? as usize;
 
-        let embedded_chunks: usize = self
-            .conn
-            .query_row("SELECT COUNT(*) FROM chunk_vectors", [], |row| {
-                row.get::<_, i64>(0)
-            })? as usize;
+        let embedded_chunks: usize =
+            self.conn
+                .query_row("SELECT COUNT(*) FROM chunk_vectors", [], |row| {
+                    row.get::<_, i64>(0)
+                })? as usize;
 
         let embedding_progress = if total_chunks == 0 {
             1.0

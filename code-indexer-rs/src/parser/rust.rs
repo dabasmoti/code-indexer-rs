@@ -167,7 +167,7 @@ impl super::LanguageParser for RustParser {
 
                 for cap in m.captures {
                     let cap_name = &mcap_names[cap.index as usize];
-                    match cap_name.as_ref() {
+                    match *cap_name {
                         "impl_name" => impl_name = cap.node.utf8_text(source).unwrap_or(""),
                         "method_name" => method_name = cap.node.utf8_text(source).unwrap_or(""),
                         "method" => method_node = Some(cap.node),

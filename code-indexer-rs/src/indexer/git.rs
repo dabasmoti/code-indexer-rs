@@ -24,10 +24,7 @@ impl GitDetector {
     }
 
     pub fn changed_files_since(&self, old_commit_hash: &str) -> Result<Vec<PathBuf>> {
-        let repo = self
-            .repo
-            .as_ref()
-            .context("Not a git repository")?;
+        let repo = self.repo.as_ref().context("Not a git repository")?;
 
         let old_oid = git2::Oid::from_str(old_commit_hash)
             .with_context(|| format!("Invalid commit hash: {}", old_commit_hash))?;
@@ -41,7 +38,9 @@ impl GitDetector {
             .context("Failed to get tree from old commit")?;
 
         let head = repo.head().context("Failed to get HEAD")?;
-        let new_commit = head.peel_to_commit().context("Failed to peel HEAD to commit")?;
+        let new_commit = head
+            .peel_to_commit()
+            .context("Failed to peel HEAD to commit")?;
         let new_tree = new_commit
             .tree()
             .context("Failed to get tree from HEAD commit")?;

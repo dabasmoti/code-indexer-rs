@@ -1,11 +1,12 @@
-use std::io::Write;
-use tempfile::NamedTempFile;
 
 #[test]
 fn test_default_config() {
     let config = code_indexer::config::Config::default();
     assert_eq!(config.indexer.max_file_size, 1_048_576);
-    assert!(config.indexer.exclude_dirs.contains(&"node_modules".to_string()));
+    assert!(config
+        .indexer
+        .exclude_dirs
+        .contains(&"node_modules".to_string()));
     assert!(config.indexer.exclude_dirs.contains(&"target".to_string()));
     assert_eq!(config.embedding.provider, "auto");
     assert_eq!(config.search.rrf_k, 60);
@@ -36,7 +37,8 @@ default_limit = 50
 #[test]
 fn test_config_env_override() {
     std::env::set_var("CODE_INDEXER_EMBEDDING_PROVIDER", "jina");
-    let config = code_indexer::config::Config::from_env_over(code_indexer::config::Config::default());
+    let config =
+        code_indexer::config::Config::from_env_over(code_indexer::config::Config::default());
     assert_eq!(config.embedding.provider, "jina");
     std::env::remove_var("CODE_INDEXER_EMBEDDING_PROVIDER");
 }
