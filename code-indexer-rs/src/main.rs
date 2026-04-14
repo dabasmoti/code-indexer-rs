@@ -5,41 +5,29 @@ use clap::{Parser, Subcommand};
 use tracing_subscriber::EnvFilter;
 
 const DEFAULT_CONFIG_TOML: &str = r#"# code-indexer configuration
-# Full reference: https://github.com/your-org/code-indexer-rs
+# Full reference: https://github.com/dabasmoti/code-indexer-rs
 
 [embedding]
-# "auto"  - detect jina-grep > ollama > openai-compat in order
-# "jina"  - jina-grep local server (Apple Silicon MLX, recommended)
+# "jina"   - jina-grep CLI on Apple Silicon (auto-starts/stops, no server needed)
 # "ollama" - local Ollama
-# "none"  - BM25-only, no semantic search
+# "auto"   - try jina > ollama > BM25-only
 provider = "jina"
 enabled = true
 
-# ── jina-grep (Apple Silicon MLX) ────────────────────────────────────────────
-# Install: pip install jina-grep
-# Run:     jina-grep start
 [embedding.jina_grep]
 url = "http://localhost:8089"
-# Recommended for code: jina-code-embeddings-0.5b (fast) or 1.5b (higher quality)
-# Recommended for prose/docs: jina-embeddings-v5-small or v5-nano
 model = "jina-code-embeddings-0.5b"
-# Matryoshka dimension reduction (64-896 for code models, 32-1024 for v5)
-# Lower = faster search + less disk. 256 is a good default for code.
 truncate_dim = 256
-# task drives prompt selection: "code" for code repos, leave unset for general text
 task = "code"
+batch_size = 64
 
-# ── Ollama (cross-platform) ───────────────────────────────────────────────────
-# Install: https://ollama.ai  then: ollama pull nomic-embed-text
 [embedding.ollama]
 url = "http://localhost:11434"
 model = "nomic-embed-text"
 
-# ── Indexer ───────────────────────────────────────────────────────────────────
 [indexer]
-max_file_size = 1_048_576  # 1 MB
+max_file_size = 1_048_576
 
-# ── Search ────────────────────────────────────────────────────────────────────
 [search]
 default_limit = 20
 max_limit = 100
@@ -65,6 +53,27 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Install the binary to ~/.local/bin (no sudo required)
+    Install,
+    /// Initialize a project: creates .code-indexer.toml and updates .mcp.json
+    Init {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        /// Overwrite existing .code-indexer.toml if present
+        #[arg(long)]
+        force: bool,
+    },
+    /// Index a repository (parse symbols and chunks)
+    Index {
+        #[arg(long, default_value = ".")]
+        repo: PathBuf,
+        #[arg(long)]
+        full: bool,
+        /// Also generate embeddings after indexing
+        #[arg(long)]
+        embed: bool,
+    },
+    /// Start the MCP server for Claude Code / Cursor
     Serve {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
@@ -77,48 +86,161 @@ enum Commands {
         #[arg(long)]
         no_watch: bool,
     },
-    Index {
-        #[arg(long, default_value = ".")]
-        repo: PathBuf,
-        #[arg(long)]
-        full: bool,
-        #[arg(long)]
-        embed: bool,
-    },
-    Init {
-        #[arg(long, default_value = ".")]
-        repo: PathBuf,
-        /// Overwrite existing .code-indexer.toml if present
-        #[arg(long)]
-        force: bool,
-    },
+    /// Show index status
     Status {
         #[arg(long, default_value = ".")]
         repo: PathBuf,
     },
+    /// Search the index
     Search {
         query: String,
         #[arg(long, default_value = ".")]
         repo: PathBuf,
-        #[arg(long, default_value = "symbol")]
+        /// "hybrid" (BM25 + semantic), "symbol" (BM25 names), "deps" (dependency graph)
+        #[arg(long, default_value = "hybrid")]
         kind: String,
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
 }
 
+// ---------------------------------------------------------------------------
+// Install
+// ---------------------------------------------------------------------------
+
+fn run_install() -> Result<()> {
+    let current_exe = std::env::current_exe()?;
+    let install_dir = dirs::home_dir()
+        .ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?
+        .join(".local")
+        .join("bin");
+
+    std::fs::create_dir_all(&install_dir)?;
+    let dest = install_dir.join("code-indexer");
+    std::fs::copy(&current_exe, &dest)?;
+
+    // Make executable
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755))?;
+    }
+
+    println!("Installed to {}", dest.display());
+
+    // Check if ~/.local/bin is on PATH
+    let path_var = std::env::var("PATH").unwrap_or_default();
+    let install_dir_str = install_dir.to_string_lossy();
+    if !path_var.split(':').any(|p| p == install_dir_str.as_ref()) {
+        println!();
+        println!("Add ~/.local/bin to your PATH. For fish shell:");
+        println!("  fish_add_path ~/.local/bin");
+        println!("For zsh/bash, add to ~/.zshrc or ~/.bashrc:");
+        println!("  export PATH=\"$HOME/.local/bin:$PATH\"");
+    }
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Init: create .code-indexer.toml + update .mcp.json
+// ---------------------------------------------------------------------------
+
+fn run_init(repo: &std::path::Path, force: bool) -> Result<()> {
+    std::fs::create_dir_all(repo)?;
+    let repo = repo.canonicalize().unwrap_or_else(|_| repo.to_path_buf());
+
+    // Write .code-indexer.toml
+    let config_path = repo.join(".code-indexer.toml");
+    if config_path.exists() && !force {
+        println!(".code-indexer.toml already exists (use --force to overwrite)");
+    } else {
+        std::fs::write(&config_path, DEFAULT_CONFIG_TOML)?;
+        println!("Created {}", config_path.display());
+    }
+
+    // Determine binary path for MCP config
+    let binary_path = which_code_indexer();
+
+    // Update .mcp.json
+    update_mcp_json(&repo, &binary_path)?;
+
+    println!();
+    println!("Next steps:");
+    println!("  code-indexer index --full --embed");
+    println!();
+    println!("Add to .gitignore:");
+    println!("  .code-indexer/");
+
+    Ok(())
+}
+
+/// Find the installed code-indexer binary path.
+fn which_code_indexer() -> String {
+    // Prefer ~/.local/bin, then current exe
+    if let Some(home) = dirs::home_dir() {
+        let local = home.join(".local").join("bin").join("code-indexer");
+        if local.exists() {
+            return local.to_string_lossy().to_string();
+        }
+    }
+    std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_string())
+        .unwrap_or_else(|_| "code-indexer".to_string())
+}
+
+/// Add or update the code-indexer entry in .mcp.json, preserving existing servers.
+fn update_mcp_json(repo: &std::path::Path, binary_path: &str) -> Result<()> {
+    let mcp_path = repo.join(".mcp.json");
+
+    // Read existing or start fresh
+    let mut root: serde_json::Value = if mcp_path.exists() {
+        let content = std::fs::read_to_string(&mcp_path)?;
+        serde_json::from_str(&content).unwrap_or_else(|_| serde_json::json!({}))
+    } else {
+        serde_json::json!({})
+    };
+
+    // Ensure mcpServers key exists
+    if root.get("mcpServers").is_none() {
+        root["mcpServers"] = serde_json::json!({});
+    }
+
+    // Add/replace code-indexer entry
+    root["mcpServers"]["code-indexer"] = serde_json::json!({
+        "command": binary_path,
+        "args": ["serve", "--repo", repo.to_string_lossy()]
+    });
+
+    let content = serde_json::to_string_pretty(&root)?;
+    std::fs::write(&mcp_path, content)?;
+    println!("Updated  {}", mcp_path.display());
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Embed pipeline (auto-starts jina-grep if needed)
+// ---------------------------------------------------------------------------
+
 async fn run_embed(db_dir: &std::path::Path, config: &Config) -> Result<()> {
+    // Auto-start jina-grep if configured but not running
+    let jina_started = if config.embedding.provider == "jina" || config.embedding.provider == "auto" {
+        maybe_start_jina(&config.embedding.jina_grep.url).await
+    } else {
+        false
+    };
+
     let provider = match detect_provider(config).await {
         Some(p) => p,
         None => {
             let hint = match config.embedding.provider.as_str() {
-                "jina" => "  → start jina-grep with: jina-grep start",
-                "ollama" => "  → start Ollama with: ollama serve",
-                _ => "  → start your configured embedding provider",
+                "jina" => "  Install jina-grep: uv tool install jina-grep --from git+https://github.com/jina-ai/jina-grep-cli.git",
+                "ollama" => "  Start Ollama: ollama serve",
+                _ => "  Start your configured embedding provider",
             };
-            println!("Embedding skipped: provider '{}' is not reachable", config.embedding.provider);
+            println!("Embedding skipped: '{}' provider not available", config.embedding.provider);
             println!("{}", hint);
-            println!("  Then re-run: code-indexer index --embed");
             return Ok(());
         }
     };
@@ -129,15 +251,18 @@ async fn run_embed(db_dir: &std::path::Path, config: &Config) -> Result<()> {
     let vector_index = VectorIndex::open(db_dir, provider.dimensions())?;
 
     let batch_size = provider.max_batch_size();
-    let mut total_embedded = 0usize;
     let total_chunks = store.count_chunks_without_embeddings()?;
 
     if total_chunks == 0 {
-        println!("Embedding: nothing to embed, all chunks already have vectors");
+        println!("Embedding: all chunks already have vectors");
+        if jina_started {
+            stop_jina();
+        }
         return Ok(());
     }
 
     println!("Embedding: {} chunks to process", total_chunks);
+    let mut total_embedded = 0usize;
 
     loop {
         let batch = store.get_chunks_without_embeddings(batch_size)?;
@@ -158,9 +283,8 @@ async fn run_embed(db_dir: &std::path::Path, config: &Config) -> Result<()> {
 
         let embeddings = provider.embed_batch(&texts).await?;
 
-        // Commit all vector writes for this batch in one transaction.
         store.conn.execute_batch("BEGIN")?;
-        for ((chunk_id, _chunk), embedding) in batch.iter().zip(embeddings.iter()) {
+        for ((chunk_id, _), embedding) in batch.iter().zip(embeddings.iter()) {
             store.store_chunk_vector(*chunk_id, embedding)?;
             vector_index.add(*chunk_id as u64, embedding)?;
         }
@@ -174,8 +298,75 @@ async fn run_embed(db_dir: &std::path::Path, config: &Config) -> Result<()> {
 
     vector_index.save()?;
     println!("\nEmbedding complete: {}/{} chunks embedded", total_embedded, total_chunks);
+
+    // Stop jina-grep if we started it
+    if jina_started {
+        stop_jina();
+    }
+
     Ok(())
 }
+
+/// Start jina-grep server if it's not already running. Returns true if we started it.
+async fn maybe_start_jina(url: &str) -> bool {
+    // Check if already running
+    if jina_health_check(url).await {
+        return false;
+    }
+
+    // Try to start it
+    let started = std::process::Command::new("jina-grep")
+        .args(["serve", "start"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .is_ok();
+
+    if !started {
+        return false;
+    }
+
+    // Wait up to 15s for it to be ready
+    print!("Starting jina-grep...");
+    use std::io::Write;
+    std::io::stdout().flush().ok();
+
+    for _ in 0..15 {
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+        if jina_health_check(url).await {
+            println!(" ready");
+            return true;
+        }
+        print!(".");
+        std::io::stdout().flush().ok();
+    }
+
+    println!(" timed out");
+    false
+}
+
+async fn jina_health_check(url: &str) -> bool {
+    reqwest::Client::new()
+        .get(format!("{}/health", url))
+        .timeout(std::time::Duration::from_secs(1))
+        .send()
+        .await
+        .map(|r| r.status().is_success())
+        .unwrap_or(false)
+}
+
+fn stop_jina() {
+    let _ = std::process::Command::new("jina-grep")
+        .args(["serve", "stop"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    println!("Stopped jina-grep server");
+}
+
+// ---------------------------------------------------------------------------
+// Main
+// ---------------------------------------------------------------------------
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -187,6 +378,38 @@ async fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
+        Commands::Install => {
+            run_install()?;
+        }
+
+        Commands::Init { repo, force } => {
+            run_init(&repo, force)?;
+        }
+
+        Commands::Index { repo, full, embed } => {
+            let mut config = Config::load(&repo)?;
+            config.indexer.watch = false;
+
+            let db_dir = repo.join(&config.storage.db_dir);
+            let pipeline = IndexPipeline::new(&repo, &db_dir, &config)?;
+
+            let stats = if full {
+                pipeline.run_full_index().await?
+            } else {
+                pipeline.run_incremental_index().await?
+            };
+
+            println!("Index complete:");
+            println!("  files indexed : {}", stats.files_indexed);
+            println!("  symbols found : {}", stats.symbols_found);
+            println!("  chunks created: {}", stats.chunks_created);
+            println!("  files skipped : {}", stats.files_skipped);
+
+            if embed {
+                run_embed(&db_dir, &config).await?;
+            }
+        }
+
         Commands::Serve {
             repo,
             transport,
@@ -215,65 +438,12 @@ async fn main() -> Result<()> {
 
             let server = CodeIndexerServer::new(repo, config).await?;
 
-            if transport == "stdio" {
-                use rmcp::{transport::stdio, ServiceExt};
-                let service = server.serve(stdio()).await?;
-                service.waiting().await?;
-            } else {
-                tracing::warn!(
-                    transport = %transport,
-                    "HTTP transport not yet implemented, falling back to stdio"
-                );
-                use rmcp::{transport::stdio, ServiceExt};
-                let service = server.serve(stdio()).await?;
-                service.waiting().await?;
+            use rmcp::{transport::stdio, ServiceExt};
+            if transport != "stdio" {
+                tracing::warn!("HTTP transport not yet implemented, falling back to stdio");
             }
-        }
-
-        Commands::Index { repo, full, embed } => {
-            let mut config = Config::load(&repo)?;
-            config.indexer.watch = false;
-
-            let db_dir = repo.join(&config.storage.db_dir);
-            let pipeline = IndexPipeline::new(&repo, &db_dir, &config)?;
-
-            let stats = if full {
-                pipeline.run_full_index().await?
-            } else {
-                pipeline.run_incremental_index().await?
-            };
-
-            println!("Index complete:");
-            println!("  files indexed : {}", stats.files_indexed);
-            println!("  symbols found : {}", stats.symbols_found);
-            println!("  chunks created: {}", stats.chunks_created);
-            println!("  files skipped : {}", stats.files_skipped);
-
-            if embed {
-                run_embed(&db_dir, &config).await?;
-            }
-        }
-
-        Commands::Init { repo, force } => {
-            std::fs::create_dir_all(&repo)?;
-            let config_path = repo.join(".code-indexer.toml");
-            if config_path.exists() && !force {
-                println!(
-                    ".code-indexer.toml already exists. Use --force to overwrite."
-                );
-            } else {
-                std::fs::write(&config_path, DEFAULT_CONFIG_TOML)?;
-                println!("Created {}", config_path.display());
-                println!();
-                println!("Next steps:");
-                println!("  1. Edit .code-indexer.toml to choose your embedding provider");
-                println!("  2. Start jina-grep (if using jina): jina-grep start");
-                println!("  3. Run: code-indexer index --full --embed");
-                println!("  4. Add to Claude Code / Cursor MCP config to start searching");
-                println!();
-                println!("Add to .gitignore:");
-                println!("  .code-indexer/");
-            }
+            let service = server.serve(stdio()).await?;
+            service.waiting().await?;
         }
 
         Commands::Status { repo } => {
@@ -285,76 +455,113 @@ async fn main() -> Result<()> {
             println!("Index status:");
             println!("  files         : {}", status.total_files);
             println!("  symbols       : {}", status.total_symbols);
-            println!(
-                "  embedding     : {:.1}%",
-                status.embedding_progress * 100.0
-            );
-            println!(
-                "  provider      : {}",
-                status.active_provider.as_deref().unwrap_or("none")
-            );
-            println!(
-                "  last commit   : {}",
-                status.last_indexed_commit.as_deref().unwrap_or("none")
-            );
+            println!("  embedding     : {:.1}%", status.embedding_progress * 100.0);
+            println!("  provider      : {}", status.active_provider.as_deref().unwrap_or("none"));
+            println!("  last commit   : {}", status.last_indexed_commit.as_deref().unwrap_or("none"));
             if !status.by_language.is_empty() {
                 println!("  languages:");
                 for (lang, count) in &status.by_language {
-                    println!("    {:?}: {}", lang, count);
+                    println!("    {}: {}", lang.as_str(), count);
                 }
             }
         }
 
-        Commands::Search {
-            query,
-            repo,
-            kind,
-            limit,
-        } => {
+        Commands::Search { query, repo, kind, limit } => {
+            let repo = repo.canonicalize().unwrap_or(repo);
             let config = Config::load(&repo)?;
             let db_dir = repo.join(&config.storage.db_dir);
             let store = SqliteStore::open(&db_dir)?;
 
             match kind.as_str() {
+                "hybrid" | "semantic" => {
+                    use code_indexer::search::{bm25, hybrid};
+
+                    // Auto-start jina if needed for query embedding
+                    let jina_started = if config.embedding.provider == "jina" || config.embedding.provider == "auto" {
+                        maybe_start_jina(&config.embedding.jina_grep.url).await
+                    } else {
+                        false
+                    };
+
+                    let provider = detect_provider(&config).await;
+
+                    let bm25_results = bm25::code_search(&store, &query, limit * 2).unwrap_or_default();
+
+                    let vector_results = if let Some(ref p) = provider {
+                        if let Ok(vi) = VectorIndex::open(&db_dir, p.dimensions()) {
+                            let query_vec = p.embed_query(&query).await.unwrap_or_default();
+                            if !query_vec.is_empty() {
+                                vi.search(&query_vec, limit * 2)
+                                    .unwrap_or_default()
+                                    .into_iter()
+                                    .filter_map(|(chunk_id, distance)| {
+                                        store.get_chunk_by_id(chunk_id as i64).ok().flatten()
+                                            .map(|chunk| code_indexer::types::SearchResult {
+                                                file_path: chunk.file_path,
+                                                line_start: chunk.line_start,
+                                                line_end: chunk.line_end,
+                                                snippet: chunk.content,
+                                                symbol_name: None,
+                                                symbol_kind: None,
+                                                score: (1.0 - distance) as f64,
+                                                language: chunk.language,
+                                            })
+                                    })
+                                    .collect()
+                            } else { vec![] }
+                        } else { vec![] }
+                    } else { vec![] };
+
+                    if jina_started {
+                        stop_jina();
+                    }
+
+                    let results = hybrid::fuse_search_results(
+                        &bm25_results,
+                        &vector_results,
+                        config.search.rrf_k,
+                        config.search.bm25_symbol_boost,
+                        limit,
+                    );
+
+                    if results.is_empty() {
+                        println!("No results for '{}'", query);
+                    } else {
+                        let mode = if provider.is_some() { "hybrid" } else { "BM25-only" };
+                        println!("Results for '{}' [{}]:\n", query, mode);
+                        for r in &results {
+                            println!("  {} (lines {}-{})", r.file_path.display(), r.line_start, r.line_end);
+                            for line in r.snippet.lines().take(5) {
+                                println!("    {}", line);
+                            }
+                            println!();
+                        }
+                    }
+                }
+
                 "deps" => {
                     let outgoing = store.get_deps_outgoing(&query)?;
                     let incoming = store.get_deps_incoming(&query)?;
-                    println!("Outgoing dependencies for '{}':", query);
+                    println!("Outgoing from '{}':", query);
                     for dep in outgoing.iter().take(limit) {
-                        println!(
-                            "  {} -> {} ({})",
-                            dep.source_file.display(),
-                            dep.target_path,
-                            format!("{:?}", dep.kind).to_lowercase()
-                        );
+                        println!("  {} -> {} ({})", dep.source_file.display(), dep.target_path, format!("{:?}", dep.kind).to_lowercase());
                     }
-                    println!("Incoming dependencies for '{}':", query);
+                    println!("Incoming to '{}':", query);
                     for dep in incoming.iter().take(limit) {
-                        println!(
-                            "  {} -> {} ({})",
-                            dep.source_file.display(),
-                            dep.target_path,
-                            format!("{:?}", dep.kind).to_lowercase()
-                        );
+                        println!("  {} -> {} ({})", dep.source_file.display(), dep.target_path, format!("{:?}", dep.kind).to_lowercase());
                     }
                 }
+
                 _ => {
-                    // Default: symbol search
                     let results = store.search_symbols(&query, limit)?;
                     if results.is_empty() {
                         println!("No symbols found for '{}'", query);
                     } else {
                         println!("Symbols matching '{}':", query);
                         for r in &results {
-                            println!(
-                                "  {} ({:?}) - {}:{}",
-                                r.name,
-                                r.kind,
-                                r.file_path.display(),
-                                r.line_start
-                            );
+                            println!("  {} ({}) - {}:{}", r.name, r.kind.as_str(), r.file_path.display(), r.line_start);
                             if let Some(sig) = &r.signature {
-                                println!("    sig: {}", sig);
+                                println!("    {}", sig);
                             }
                         }
                     }
