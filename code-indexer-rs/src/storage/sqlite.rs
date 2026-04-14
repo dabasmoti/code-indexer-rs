@@ -98,9 +98,11 @@ impl SqliteStore {
             );
 
             CREATE TABLE IF NOT EXISTS embedding_cache (
-                content_hash TEXT PRIMARY KEY,
-                embedding    BLOB NOT NULL,
-                created_at   TEXT NOT NULL DEFAULT (datetime('now'))
+                content_hash TEXT NOT NULL,
+                provider TEXT NOT NULL,
+                dimensions INTEGER NOT NULL,
+                vector BLOB NOT NULL,
+                PRIMARY KEY (content_hash, provider, dimensions)
             );
 
             CREATE TABLE IF NOT EXISTS file_deps (
@@ -300,28 +302,26 @@ impl SqliteStore {
         Ok(results)
     }
 
-    pub fn get_cached_embedding(&self, content_hash: &str) -> Result<Option<Vec<f32>>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT embedding FROM embedding_cache WHERE content_hash = ?1")?;
-
-        let mut rows = stmt.query_map(params![content_hash], |row| {
+    pub fn get_cached_embedding(&self, content_hash: &str, provider: &str, dimensions: usize) -> Result<Option<Vec<f32>>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT vector FROM embedding_cache WHERE content_hash = ?1 AND provider = ?2 AND dimensions = ?3"
+        )?;
+        let result = stmt.query_row(params![content_hash, provider, dimensions], |row| {
             let blob: Vec<u8> = row.get(0)?;
-            Ok(blob)
-        })?;
-
-        match rows.next() {
-            Some(row) => Ok(Some(bytes_to_vec(&row?))),
-            None => Ok(None),
+            Ok(bytes_to_vec(&blob))
+        });
+        match result {
+            Ok(v) => Ok(Some(v)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
         }
     }
 
-    pub fn store_cached_embedding(&self, content_hash: &str, embedding: &[f32]) -> Result<()> {
-        let blob = vec_to_bytes(embedding);
+    pub fn store_cached_embedding(&self, content_hash: &str, provider: &str, dimensions: usize, vector: &[f32]) -> Result<()> {
+        let blob = vec_to_bytes(vector);
         self.conn.execute(
-            r#"INSERT OR REPLACE INTO embedding_cache (content_hash, embedding)
-               VALUES (?1, ?2)"#,
-            params![content_hash, blob],
+            "INSERT OR REPLACE INTO embedding_cache (content_hash, provider, dimensions, vector) VALUES (?1, ?2, ?3, ?4)",
+            params![content_hash, provider, dimensions, blob],
         )?;
         Ok(())
     }
