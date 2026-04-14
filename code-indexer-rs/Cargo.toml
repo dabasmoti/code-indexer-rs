@@ -60,6 +60,7 @@ async-trait = "0.1"
 sha2 = "0.10"
 hex = "0.4"
 walkdir = "2"
+ignore = "0.4"
 streaming-iterator = "0.1"
 
 # Config paths

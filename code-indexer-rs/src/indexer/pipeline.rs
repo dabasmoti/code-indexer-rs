@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
+use ignore::WalkBuilder;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
 use crate::config::Config;
 use crate::indexer::git::GitDetector;
@@ -41,6 +41,7 @@ impl IndexPipeline {
     }
 
     pub async fn run_full_index(&self) -> Result<IndexStats> {
+        self.store.clear_all()?;
         let files = self.discover_files()?;
         self.index_files(files).await
     }
@@ -86,20 +87,18 @@ impl IndexPipeline {
     pub fn discover_files(&self) -> Result<Vec<PathBuf>> {
         let mut files = Vec::new();
 
-        let walker = WalkDir::new(&self.repo_path)
+        // WalkBuilder respects .gitignore, .ignore, and global git excludes automatically.
+        let walker = WalkBuilder::new(&self.repo_path)
             .follow_links(false)
-            .into_iter()
-            .filter_entry(|e| {
-                if e.file_type().is_dir() {
-                    let dir_name = e.file_name().to_string_lossy().to_string();
-                    return !self.is_excluded_dir_name(&dir_name);
-                }
-                true
-            });
+            .git_ignore(true)
+            .git_global(true)
+            .git_exclude(true)
+            .hidden(true) // skip hidden files/dirs (dot-prefixed)
+            .build();
 
         for entry in walker {
             match entry {
-                Ok(e) if e.file_type().is_file() => {
+                Ok(e) if e.file_type().map(|t| t.is_file()).unwrap_or(false) => {
                     let path = e.into_path();
                     if self.should_index(&path) {
                         files.push(path);

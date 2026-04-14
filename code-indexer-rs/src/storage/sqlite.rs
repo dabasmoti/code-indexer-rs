@@ -414,6 +414,18 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn clear_all(&self) -> Result<()> {
+        self.conn.execute_batch(
+            "DELETE FROM chunk_vectors;
+             DELETE FROM chunks;
+             DELETE FROM symbols;
+             DELETE FROM file_deps;
+             DELETE FROM indexed_files;
+             DELETE FROM index_meta;",
+        )?;
+        Ok(())
+    }
+
     pub fn insert_deps(&self, deps: &[DepEdge]) -> Result<()> {
         let mut stmt = self.conn.prepare(
             r#"INSERT INTO file_deps (source_file, target_path, kind, line_number)
