@@ -12,12 +12,12 @@ const DEFAULT_CONFIG_TOML: &str = r#"# code-indexer configuration
 # "jina"  - jina-grep local server (Apple Silicon MLX, recommended)
 # "ollama" - local Ollama
 # "none"  - BM25-only, no semantic search
-provider = "auto"
+provider = "jina"
 enabled = true
 
 # ── jina-grep (Apple Silicon MLX) ────────────────────────────────────────────
-# Install: https://github.com/jina-ai/jina-grep
-# Run:     jina-grep serve
+# Install: pip install jina-grep
+# Run:     jina-grep start
 [embedding.jina_grep]
 url = "http://localhost:8089"
 # Recommended for code: jina-code-embeddings-0.5b (fast) or 1.5b (higher quality)
@@ -111,7 +111,14 @@ async fn run_embed(db_dir: &std::path::Path, config: &Config) -> Result<()> {
     let provider = match detect_provider(config).await {
         Some(p) => p,
         None => {
-            println!("Embedding: no provider available, skipping");
+            let hint = match config.embedding.provider.as_str() {
+                "jina" => "  → start jina-grep with: jina-grep start",
+                "ollama" => "  → start Ollama with: ollama serve",
+                _ => "  → start your configured embedding provider",
+            };
+            println!("Embedding skipped: provider '{}' is not reachable", config.embedding.provider);
+            println!("{}", hint);
+            println!("  Then re-run: code-indexer index --embed");
             return Ok(());
         }
     };
@@ -260,8 +267,9 @@ async fn main() -> Result<()> {
                 println!();
                 println!("Next steps:");
                 println!("  1. Edit .code-indexer.toml to choose your embedding provider");
-                println!("  2. Run: code-indexer index --embed");
-                println!("  3. Add to Claude Code / Cursor MCP config to start searching");
+                println!("  2. Start jina-grep (if using jina): jina-grep start");
+                println!("  3. Run: code-indexer index --full --embed");
+                println!("  4. Add to Claude Code / Cursor MCP config to start searching");
                 println!();
                 println!("Add to .gitignore:");
                 println!("  .code-indexer/");
