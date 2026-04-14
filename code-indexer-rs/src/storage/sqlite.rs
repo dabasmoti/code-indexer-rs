@@ -230,6 +230,15 @@ impl SqliteStore {
         Ok(ids)
     }
 
+    pub fn count_chunks_without_embeddings(&self) -> Result<usize> {
+        let count: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM chunks c WHERE NOT EXISTS (SELECT 1 FROM chunk_vectors cv WHERE cv.chunk_id = c.id)",
+            [],
+            |row| row.get(0),
+        )?;
+        Ok(count as usize)
+    }
+
     pub fn get_chunks_without_embeddings(&self, limit: usize) -> Result<Vec<(i64, Chunk)>> {
         let mut stmt = self.conn.prepare(
             r#"SELECT c.id, c.file_path, c.content, c.preamble, c.content_hash,

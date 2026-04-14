@@ -123,6 +123,14 @@ async fn run_embed(db_dir: &std::path::Path, config: &Config) -> Result<()> {
 
     let batch_size = provider.max_batch_size();
     let mut total_embedded = 0usize;
+    let total_chunks = store.count_chunks_without_embeddings()?;
+
+    if total_chunks == 0 {
+        println!("Embedding: nothing to embed, all chunks already have vectors");
+        return Ok(());
+    }
+
+    println!("Embedding: {} chunks to process", total_chunks);
 
     loop {
         let batch = store.get_chunks_without_embeddings(batch_size)?;
@@ -143,17 +151,22 @@ async fn run_embed(db_dir: &std::path::Path, config: &Config) -> Result<()> {
 
         let embeddings = provider.embed_batch(&texts).await?;
 
+        // Commit all vector writes for this batch in one transaction.
+        store.conn.execute_batch("BEGIN")?;
         for ((chunk_id, _chunk), embedding) in batch.iter().zip(embeddings.iter()) {
             store.store_chunk_vector(*chunk_id, embedding)?;
             vector_index.add(*chunk_id as u64, embedding)?;
         }
+        store.conn.execute_batch("COMMIT")?;
 
         total_embedded += batch.len();
-        println!("  embedded {} chunks so far...", total_embedded);
+        print!("\r  embedded {}/{} chunks...", total_embedded, total_chunks);
+        use std::io::Write;
+        std::io::stdout().flush().ok();
     }
 
     vector_index.save()?;
-    println!("Embedding complete: {} chunks embedded", total_embedded);
+    println!("\nEmbedding complete: {}/{} chunks embedded", total_embedded, total_chunks);
     Ok(())
 }
 
