@@ -169,6 +169,29 @@ impl IndexPipeline {
     async fn index_files(&self, files: Vec<PathBuf>) -> Result<IndexStats> {
         let mut stats = IndexStats::default();
 
+        // Wrap all inserts in a single transaction — dramatically faster than
+        // one autocommit per insert (avoids per-row WAL flush).
+        self.store.conn.execute_batch("BEGIN")?;
+
+        let result = self.index_files_inner(&files, &mut stats);
+
+        match result {
+            Ok(()) => self.store.conn.execute_batch("COMMIT")?,
+            Err(ref _e) => {
+                let _ = self.store.conn.execute_batch("ROLLBACK");
+                return result.map(|_| stats);
+            }
+        }
+
+        // Record the current HEAD commit hash after indexing
+        if let Some(commit_hash) = self.git.head_commit_hash() {
+            self.store.set_meta("last_indexed_commit", &commit_hash)?;
+        }
+
+        Ok(stats)
+    }
+
+    fn index_files_inner(&self, files: &[PathBuf], stats: &mut IndexStats) -> Result<()> {
         for file_path in files {
             let rel_path = file_path
                 .strip_prefix(&self.repo_path)
@@ -238,12 +261,7 @@ impl IndexPipeline {
             stats.chunks_created += chunk_count;
         }
 
-        // Record the current HEAD commit hash after indexing
-        if let Some(commit_hash) = self.git.head_commit_hash() {
-            self.store.set_meta("last_indexed_commit", &commit_hash)?;
-        }
-
-        Ok(stats)
+        Ok(())
     }
 }
 

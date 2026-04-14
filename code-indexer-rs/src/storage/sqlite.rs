@@ -7,7 +7,7 @@ use crate::types::{
 };
 
 pub struct SqliteStore {
-    conn: Connection,
+    pub conn: Connection,
 }
 
 impl SqliteStore {
