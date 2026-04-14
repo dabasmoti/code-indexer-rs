@@ -157,19 +157,33 @@ impl SqliteStore {
 
     pub fn search_symbols(&self, query: &str, limit: usize) -> Result<Vec<SymbolSearchResult>> {
         let fts_query = format!("{}*", query);
+        let like_pattern = format!("%{}%", query);
+
+        // Union FTS5 full-text search with a LIKE name search to also capture camelCase
+        // symbol names (e.g. "DataProcessor" matched by query "process"). UNION (without ALL)
+        // deduplicates rows that appear in both result sets.
         let mut stmt = self.conn.prepare(
             r#"SELECT s.name, s.kind, s.language, s.file_path,
                       s.line_start, s.line_end, s.signature, s.doc_comment,
-                      s.visibility, f.rank
+                      s.visibility, f.rank AS score
                FROM symbols_fts f
                JOIN symbols s ON s.id = f.rowid
                WHERE symbols_fts MATCH ?1
-               ORDER BY rank
-               LIMIT ?2"#,
+               UNION
+               SELECT s.name, s.kind, s.language, s.file_path,
+                      s.line_start, s.line_end, s.signature, s.doc_comment,
+                      s.visibility, 0.0 AS score
+               FROM symbols s
+               WHERE lower(s.name) LIKE lower(?2)
+                 AND s.id NOT IN (
+                     SELECT f2.rowid FROM symbols_fts f2 WHERE symbols_fts MATCH ?1
+                 )
+               ORDER BY score
+               LIMIT ?3"#,
         )?;
 
         let results = stmt
-            .query_map(params![fts_query, limit as i64], |row| {
+            .query_map(params![fts_query, like_pattern, limit as i64], |row| {
                 let kind_str: String = row.get(1)?;
                 let lang_str: String = row.get(2)?;
                 let file_str: String = row.get(3)?;
