@@ -53,7 +53,7 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
-    /// Install the binary to ~/.local/bin (no sudo required)
+    /// Install the binary to ~/.cargo/bin via cargo install
     Install,
     /// Initialize a project: creates .code-indexer.toml and updates .mcp.json
     Init {
@@ -109,34 +109,15 @@ enum Commands {
 // ---------------------------------------------------------------------------
 
 fn run_install() -> Result<()> {
-    let current_exe = std::env::current_exe()?;
-    let install_dir = dirs::home_dir()
-        .ok_or_else(|| anyhow::anyhow!("Cannot find home directory"))?
-        .join(".local")
-        .join("bin");
+    let manifest_dir = env!("CARGO_MANIFEST_DIR");
+    println!("Installing code-indexer to ~/.cargo/bin ...");
 
-    std::fs::create_dir_all(&install_dir)?;
-    let dest = install_dir.join("code-indexer");
-    std::fs::copy(&current_exe, &dest)?;
+    let status = std::process::Command::new("cargo")
+        .args(["install", "--path", manifest_dir])
+        .status()?;
 
-    // Make executable
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755))?;
-    }
-
-    println!("Installed to {}", dest.display());
-
-    // Check if ~/.local/bin is on PATH
-    let path_var = std::env::var("PATH").unwrap_or_default();
-    let install_dir_str = install_dir.to_string_lossy();
-    if !path_var.split(':').any(|p| p == install_dir_str.as_ref()) {
-        println!();
-        println!("Add ~/.local/bin to your PATH. For fish shell:");
-        println!("  fish_add_path ~/.local/bin");
-        println!("For zsh/bash, add to ~/.zshrc or ~/.bashrc:");
-        println!("  export PATH=\"$HOME/.local/bin:$PATH\"");
+    if !status.success() {
+        anyhow::bail!("cargo install failed");
     }
 
     Ok(())
@@ -177,11 +158,11 @@ fn run_init(repo: &std::path::Path, force: bool) -> Result<()> {
 
 /// Find the installed code-indexer binary path.
 fn which_code_indexer() -> String {
-    // Prefer ~/.local/bin, then current exe
+    // Prefer ~/.cargo/bin (cargo install target), then current exe
     if let Some(home) = dirs::home_dir() {
-        let local = home.join(".local").join("bin").join("code-indexer");
-        if local.exists() {
-            return local.to_string_lossy().to_string();
+        let cargo_bin = home.join(".cargo").join("bin").join("code-indexer");
+        if cargo_bin.exists() {
+            return cargo_bin.to_string_lossy().to_string();
         }
     }
     std::env::current_exe()
