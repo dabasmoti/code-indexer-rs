@@ -449,6 +449,16 @@ impl SqliteStore {
         Ok(())
     }
 
+    pub fn get_all_indexed_file_paths(&self) -> Result<Vec<String>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT file_path FROM indexed_files")?;
+        let paths = stmt
+            .query_map([], |row| row.get(0))?
+            .collect::<rusqlite::Result<Vec<String>>>()?;
+        Ok(paths)
+    }
+
     pub fn get_file_content_hash(&self, file_path: &str) -> Result<Option<String>> {
         let mut stmt = self
             .conn

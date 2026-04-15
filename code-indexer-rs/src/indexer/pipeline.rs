@@ -47,6 +47,34 @@ impl IndexPipeline {
     }
 
     pub async fn run_incremental_index(&self) -> Result<IndexStats> {
+        // Always discover currently-indexable files so we can purge stale entries
+        // (files deleted from disk or newly gitignored since last run).
+        let all_files = self.discover_files()?;
+        let current_rel_paths: std::collections::HashSet<String> = all_files
+            .iter()
+            .map(|f| {
+                f.strip_prefix(&self.repo_path)
+                    .unwrap_or(f)
+                    .to_string_lossy()
+                    .to_string()
+            })
+            .collect();
+
+        // Purge any indexed file that is no longer on disk or is now gitignored.
+        let indexed_paths = self.store.get_all_indexed_file_paths()?;
+        let stale_paths: Vec<String> = indexed_paths
+            .into_iter()
+            .filter(|p| !current_rel_paths.contains(p))
+            .collect();
+
+        if !stale_paths.is_empty() {
+            self.store.conn.execute_batch("BEGIN")?;
+            for path in &stale_paths {
+                self.store.delete_file_data(path)?;
+            }
+            self.store.conn.execute_batch("COMMIT")?;
+        }
+
         let last_commit = self.store.get_meta("last_indexed_commit")?;
 
         if let Some(old_hash) = last_commit {
@@ -62,7 +90,6 @@ impl IndexPipeline {
         }
 
         // Fall back to content hash comparison
-        let all_files = self.discover_files()?;
         let mut changed_files = Vec::new();
 
         for file in all_files {
