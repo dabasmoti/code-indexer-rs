@@ -2,8 +2,11 @@ use anyhow::{Context, Result};
 use rusqlite::{params, Connection};
 use std::path::Path;
 
+use std::path::PathBuf;
+
 use crate::types::{
-    Chunk, DepEdge, ImportKind, IndexStatus, Language, Symbol, SymbolKind, SymbolSearchResult,
+    Chunk, DepEdge, ImportKind, IndexStatus, Language, SearchResult, Symbol, SymbolKind,
+    SymbolSearchResult,
 };
 
 pub struct SqliteStore {
@@ -92,6 +95,27 @@ impl SqliteStore {
             );
 
             CREATE INDEX IF NOT EXISTS idx_chunks_file_path ON chunks(file_path);
+
+            CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+                content,
+                preamble,
+                file_path,
+                content='chunks',
+                content_rowid='id',
+                tokenize='porter unicode61'
+            );
+
+            CREATE TRIGGER IF NOT EXISTS chunks_ai
+            AFTER INSERT ON chunks BEGIN
+                INSERT INTO chunks_fts(rowid, content, preamble, file_path)
+                VALUES (new.id, new.content, new.preamble, new.file_path);
+            END;
+
+            CREATE TRIGGER IF NOT EXISTS chunks_ad
+            AFTER DELETE ON chunks BEGIN
+                INSERT INTO chunks_fts(chunks_fts, rowid, content, preamble, file_path)
+                VALUES ('delete', old.id, old.content, old.preamble, old.file_path);
+            END;
 
             CREATE TABLE IF NOT EXISTS chunk_vectors (
                 chunk_id  INTEGER PRIMARY KEY REFERENCES chunks(id) ON DELETE CASCADE,
@@ -204,6 +228,45 @@ impl SqliteStore {
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
+
+        Ok(results)
+    }
+
+    pub fn search_chunks(&self, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
+        let fts_query = format!("{}*", query);
+        let mut stmt = self.conn.prepare(
+            r#"SELECT c.file_path, c.content, c.line_start, c.line_end, c.language, f.rank
+               FROM chunks_fts f
+               JOIN chunks c ON c.id = f.rowid
+               WHERE chunks_fts MATCH ?1
+               ORDER BY f.rank
+               LIMIT ?2"#,
+        )?;
+
+        let results = stmt
+            .query_map(params![fts_query, limit as i64], |row| {
+                let file_str: String = row.get(0)?;
+                let content: String = row.get(1)?;
+                let line_start: i64 = row.get(2)?;
+                let line_end: i64 = row.get(3)?;
+                let lang_str: String = row.get(4)?;
+                let rank: f64 = row.get(5)?;
+
+                Ok(SearchResult {
+                    file_path: PathBuf::from(file_str),
+                    line_start: line_start as usize,
+                    line_end: line_end as usize,
+                    snippet: content,
+                    symbol_name: None,
+                    symbol_kind: None,
+                    score: rank,
+                    language: Language::from_extension(
+                        &lang_str
+                    ).unwrap_or(Language::Rust),
+                })
+            })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         Ok(results)
     }

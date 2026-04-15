@@ -14,8 +14,8 @@ pub fn symbol_search(
 }
 
 pub fn code_search(store: &SqliteStore, query: &str, limit: usize) -> Result<Vec<SearchResult>> {
-    let symbol_results = store.search_symbols(query, limit)?;
-    Ok(symbol_results
+    // Search both symbols and code chunks, merge results
+    let symbol_results: Vec<SearchResult> = store.search_symbols(query, limit)?
         .into_iter()
         .map(|s| SearchResult {
             file_path: s.file_path,
@@ -27,5 +27,18 @@ pub fn code_search(store: &SqliteStore, query: &str, limit: usize) -> Result<Vec
             score: s.score,
             language: s.language,
         })
-        .collect())
+        .collect();
+
+    let chunk_results = store.search_chunks(query, limit).unwrap_or_default();
+
+    // Merge: symbols first (higher relevance for exact name matches), then chunks
+    let mut merged = symbol_results;
+    merged.extend(chunk_results);
+
+    // Deduplicate by file_path + line_start
+    let mut seen = std::collections::HashSet::new();
+    merged.retain(|r| seen.insert((r.file_path.clone(), r.line_start)));
+    merged.truncate(limit);
+
+    Ok(merged)
 }
