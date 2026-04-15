@@ -23,6 +23,9 @@ impl VectorIndex {
         let index = Index::new(&options)?;
         if index_path.exists() {
             index.load(index_path.to_str().unwrap())?;
+            // Reserve extra capacity for incremental adds
+            let current = index.capacity();
+            index.reserve(current + 10_000)?;
         } else {
             index.reserve(10_000)?;
         }

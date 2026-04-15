@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 const DEFAULT_MAX_FILE_SIZE: u64 = 1_048_576;
 const DEFAULT_EMBEDDING_PROVIDER: &str = "auto";
-const DEFAULT_JINA_GREP_URL: &str = "http://localhost:8089";
+const DEFAULT_JINA_GREP_URL: &str = "http://localhost:8099";
 const DEFAULT_JINA_GREP_MODEL: &str = "jina-code-embeddings-0.5b";
 const DEFAULT_JINA_GREP_TRUNCATE_DIM: u32 = 256;
 const DEFAULT_JINA_GREP_BATCH_SIZE: usize = 64;

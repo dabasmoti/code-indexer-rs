@@ -15,7 +15,7 @@ provider = "jina"
 enabled = true
 
 [embedding.jina_grep]
-url = "http://localhost:8089"
+url = "http://localhost:8099"
 model = "jina-code-embeddings-0.5b"
 truncate_dim = 256
 task = "code"
