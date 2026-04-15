@@ -306,8 +306,15 @@ async fn maybe_start_jina(url: &str) -> bool {
     let already_running = jina_health_check(url).await;
 
     if !already_running {
+        // Extract port from URL (e.g. "http://localhost:8099" -> "8099")
+        let port = url
+            .rsplit(':')
+            .next()
+            .and_then(|p| p.trim_end_matches('/').parse::<u16>().ok())
+            .unwrap_or(8099);
+
         let started = std::process::Command::new("jina-grep")
-            .args(["serve", "start"])
+            .args(["serve", "start", "--port", &port.to_string()])
             .stdout(std::process::Stdio::null())
             .stderr(std::process::Stdio::null())
             .spawn()
@@ -445,6 +452,37 @@ async fn main() -> Result<()> {
                 symbols = stats.symbols_found,
                 "initial incremental index complete"
             );
+
+            // Start file watcher for auto-indexing on changes
+            if !no_watch {
+                use code_indexer::indexer::watcher::FileWatcher;
+                let watch_repo = repo.clone();
+                let watch_db_dir = db_dir.clone();
+                let watch_config = config.clone();
+                let watcher = FileWatcher::new(config.indexer.watch_debounce_ms);
+                watcher.watch(&repo, move |_changed_paths| {
+                    let rt = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build();
+                    if let Ok(rt) = rt {
+                        rt.block_on(async {
+                            if let Ok(p) = IndexPipeline::new(&watch_repo, &watch_db_dir, &watch_config) {
+                                match p.run_incremental_index().await {
+                                    Ok(stats) if stats.files_indexed > 0 => {
+                                        tracing::info!(
+                                            files = stats.files_indexed,
+                                            symbols = stats.symbols_found,
+                                            "file watcher: re-indexed"
+                                        );
+                                    }
+                                    _ => {}
+                                }
+                            }
+                        });
+                    }
+                })?;
+                tracing::info!("file watcher active");
+            }
 
             let server = CodeIndexerServer::new(repo, config).await?;
 
